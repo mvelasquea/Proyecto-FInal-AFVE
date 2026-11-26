@@ -1,0 +1,124 @@
+-- ============================================================================
+-- Proyecto: Sistema Instrumentado de Seguridad para Efluentes Mineros (SIS)
+-- Parte 2: Model Checking en NuSMV (Cuarto Entregable - UNSA 2026)
+-- Modelo: Comportamiento de una estacion (ValvulaControl + Poza + Sensor)
+-- Referencia: SistemaSIS_Efluentes.vdmpp / D.S. N. 010-2010-MINAM
+-- ============================================================================
+
+MODULE main
+
+VAR
+  -- Estado discreto de la valvula de control (EstadoValvula en VDM++)
+  valvula : {CERRADA, ABIERTA_DESCARGA, DESVIADA_POZA};
+
+  -- Modo operativo global del SIS (EstadoSistema en VDM++)
+  estadoGlobal : {MODO_NORMAL, MODO_CONTINGENCIA, BLOQUEO_EMERGENCIA};
+
+  -- Volumen acumulado en la poza de retencion (discretizado: 0..4,
+  -- donde 1 unidad = 50 m3 y CAP_MAX = 4 equivale a 200 m3, como en CP-04)
+  volTanque : 0..4;
+
+  -- Indicador de tratamiento quimico aplicado a la poza
+  neutralizanteListo : boolean;
+
+  -- Variables de entorno / entradas (no deterministas)
+  sensor             : {OPERATIVO, DEFECTUOSO, SIN_SENAL};
+  infraccion         : boolean;  -- TRUE si ph, CN, As o SST supera LMP
+  aplicarTratamiento : boolean;  -- Operador aplica neutralizante
+  autorizarPurga     : boolean;  -- Operador solicita purga y restablecimiento
+
+DEFINE
+  CAP_MAX         := 4;
+  emergencia      := infraccion | (sensor != OPERATIVO);
+  hayCapacidad    := (volTanque < CAP_MAX);
+  purgaHabilitada := !emergencia & (volTanque > 0) & neutralizanteListo & autorizarPurga;
+
+ASSIGN
+  -- Estado inicial (corresponde al constructor de ValvulaControl y SistemaSIS)
+  init(valvula)            := CERRADA;
+  init(estadoGlobal)       := MODO_NORMAL;
+  init(volTanque)          := 0;
+  init(neutralizanteListo) := FALSE;
+
+  -- Transiciones de la valvula de control
+  next(valvula) := case
+    -- 1. Emergencia con capacidad en poza -> desviarAPoza
+    emergencia & hayCapacidad : DESVIADA_POZA;
+
+    -- 2. Emergencia con poza saturada -> cerrarBloqueoTotal
+    emergencia & !hayCapacidad : CERRADA;
+
+    -- 3. Sin emergencia y poza vacia -> abrirDescarga
+    !emergencia & (volTanque = 0) : ABIERTA_DESCARGA;
+
+    -- 4. Sin emergencia, con volumen y neutralizante listo -> purgarYRestablecer
+    purgaHabilitada : ABIERTA_DESCARGA;
+
+    -- 5. Sin emergencia, pero aun esperando tratamiento/purga -> mantener estado
+    TRUE : valvula;
+  esac;
+
+  -- Transiciones del modo operativo global
+  next(estadoGlobal) := case
+    emergencia & !hayCapacidad    : BLOQUEO_EMERGENCIA;
+    emergencia & hayCapacidad     : MODO_CONTINGENCIA;
+    purgaHabilitada               : MODO_NORMAL;
+    !emergencia & (volTanque = 0) : MODO_NORMAL;
+    TRUE                          : estadoGlobal;
+  esac;
+
+  -- Evolucion del volumen en la poza de retencion
+  next(volTanque) := case
+    -- Desvio a poza suma 1 unidad (hasta CAP_MAX)
+    emergencia & hayCapacidad : volTanque + 1;
+
+    -- Purga segura vacia la poza por completo
+    purgaHabilitada : 0;
+
+    -- En bloqueo total o espera, el volumen se conserva
+    TRUE : volTanque;
+  esac;
+
+  -- Evolucion del estado del neutralizante
+  next(neutralizanteListo) := case
+    -- Nuevo ingreso contaminado a la poza invalida neutralizante previo
+    emergencia & hayCapacidad : FALSE;
+
+    -- Al completar la purga se reinicia el indicador
+    purgaHabilitada : FALSE;
+
+    -- Aplicacion de tratamiento quimico cuando hay volumen acumulado
+    !emergencia & (volTanque > 0) & !neutralizanteListo & aplicarTratamiento : TRUE;
+
+    -- En cualquier otro caso se mantiene
+    TRUE : neutralizanteListo;
+  esac;
+
+-- ============================================================================
+-- PROPIEDADES FORMALES EN LOGICA TEMPORAL LINEAL (LTL)
+-- ============================================================================
+
+-- Propiedad 1 (Seguridad Fail-Safe - uso de G):
+-- Siempre que exista infraccion de LMP o falla del sensor, la valvula
+-- nunca queda en ABIERTA_DESCARGA en la transicion de respuesta.
+LTLSPEC G (emergencia -> X (valvula != ABIERTA_DESCARGA))
+
+-- Propiedad 2 (Seguridad de Bloqueo Total por Saturacion - uso de G):
+-- Siempre que haya emergencia y la poza este llena (volTanque = CAP_MAX),
+-- la valvula ejecuta cierre hermetico total (CERRADA).
+LTLSPEC G ((emergencia & volTanque = 4) -> X (valvula = CERRADA))
+
+-- Propiedad 3 (Seguridad de Capacidad de Poza - uso de G):
+-- El volumen almacenado en la poza nunca supera la capacidad maxima.
+LTLSPEC G (volTanque >= 0 & volTanque <= 4)
+
+-- Propiedad 4 (Permisivo de Purga Segura - uso de G):
+-- Nunca se vacia el tanque (volTanque = 0) si hay volumen almacenado
+-- y el neutralizante no esta listo.
+LTLSPEC G ((volTanque > 0 & !neutralizanteListo) -> X (volTanque > 0))
+
+-- Propiedad 5 (Vivacidad / Recuperacion del Sistema - uso de G y F):
+-- Siempre que la valvula este contenida (DESVIADA_POZA o CERRADA),
+-- sin emergencia, con volumen tratado y purga autorizada, eventualmente
+-- el sistema vacia la poza y restablece ABIERTA_DESCARGA.
+LTLSPEC G (purgaHabilitada -> F (valvula = ABIERTA_DESCARGA & volTanque = 0))

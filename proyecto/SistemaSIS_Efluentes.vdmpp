@@ -1,0 +1,496 @@
+class EstacionMonitoreo
+
+types
+  public EstacionId = token;
+  public SensorId   = token;
+  public LoteId     = token;
+
+  public ParametroQuimico = <PH> | <CIANURO_TOTAL> | <ARSENICO_TOTAL> | <SST>;
+  public EstadoSensor = <OPERATIVO> | <DEFECTUOSO> | <CALIBRACION> | <SIN_SENAL>;
+  public EstadoValvula = <CERRADA> | <ABIERTA_DESCARGA> | <DESVIADA_POZA>;
+
+  public LecturaEfluente ::
+    ph            : real
+    cianuroTotal  : real
+    arsenicoTotal : real
+    sst           : real
+    estadoSensor  : EstadoSensor
+    estadoValvula : EstadoValvula
+  inv lect ==
+    -- limites fisicos y regla fail-safe (DS 010-2010-MINAM)
+    (lect.ph >= 0.0 and lect.ph <= 14.0) and
+    (lect.cianuroTotal >= 0.0) and
+    (lect.arsenicoTotal >= 0.0) and
+    (lect.sst >= 0.0) and
+    (lect.estadoValvula = <ABIERTA_DESCARGA> =>
+      (lect.estadoSensor = <OPERATIVO> and
+       lect.ph >= 6.0 and lect.ph <= 9.0 and
+       lect.cianuroTotal <= 1.0 and
+       lect.arsenicoTotal <= 0.1 and
+       lect.sst <= 50.0));
+
+values
+  public LMP_PH_MIN       : real = 6.0;
+  public LMP_PH_MAX       : real = 9.0;
+  public LMP_CIANURO_MAX  : real = 1.0;
+  public LMP_ARSENICO_MAX : real = 0.1;
+  public LMP_SST_MAX      : real = 50.0;
+
+instance variables
+  public idEstacion             : EstacionId := mk_token("E0");
+  public ubicacionCuenca        : seq of char := "";
+  public lecturaActual          : LecturaEfluente := mk_LecturaEfluente(7.0, 0.0, 0.0, 0.0, <OPERATIVO>, <CERRADA>);
+  public historialLecturas      : seq of LecturaEfluente := [mk_LecturaEfluente(7.0, 0.0, 0.0, 0.0, <OPERATIVO>, <CERRADA>)];
+  public parametrosEnInfraccion : set of ParametroQuimico := {};
+  public sensoresInstalados     : set of SensorId := {};
+
+  -- la lectura actual siempre es la ultima de la secuencia
+  inv (len historialLecturas > 0 =>
+         lecturaActual = historialLecturas(len historialLecturas));
+
+operations
+  public EstacionMonitoreo : EstacionId * seq of char * LecturaEfluente ==> EstacionMonitoreo
+  EstacionMonitoreo(id, cuenca, lectInicial) == (
+    atomic (
+      idEstacion := id;
+      ubicacionCuenca := cuenca;
+      lecturaActual := lectInicial;
+      historialLecturas := [lectInicial];
+    );
+    evaluarInfracciones(lectInicial);
+    return self
+  )
+  pre len cuenca > 0
+  post historialLecturas = [lectInicial] and lecturaActual = lectInicial;
+
+  public registrarLectura : LecturaEfluente ==> ()
+  registrarLectura(nuevaLectura) == (
+    atomic (
+      lecturaActual := nuevaLectura;
+      historialLecturas := historialLecturas ^ [nuevaLectura];
+    );
+    evaluarInfracciones(nuevaLectura);
+  )
+  post len historialLecturas = len historialLecturas~ + 1 and
+       lecturaActual = nuevaLectura;
+
+  private evaluarInfracciones : LecturaEfluente ==> ()
+  evaluarInfracciones(l) == (
+    dcl infracciones : set of ParametroQuimico := {};
+    if l.ph < LMP_PH_MIN or l.ph > LMP_PH_MAX then
+      infracciones := infracciones union {<PH>};
+    if l.cianuroTotal > LMP_CIANURO_MAX then
+      infracciones := infracciones union {<CIANURO_TOTAL>};
+    if l.arsenicoTotal > LMP_ARSENICO_MAX then
+      infracciones := infracciones union {<ARSENICO_TOTAL>};
+    if l.sst > LMP_SST_MAX then
+      infracciones := infracciones union {<SST>};
+    parametrosEnInfraccion := infracciones;
+  );
+
+  public agregarSensor : SensorId ==> ()
+  agregarSensor(nuevoSensor) == (
+    sensoresInstalados := sensoresInstalados union {nuevoSensor};
+  )
+  pre nuevoSensor not in set sensoresInstalados
+  post nuevoSensor in set sensoresInstalados;
+
+  public tieneInfraccion : () ==> bool
+  tieneInfraccion() ==
+    return parametrosEnInfraccion <> {};
+
+end EstacionMonitoreo
+
+
+class ValvulaControl
+
+types
+  public ValvulaId     = token;
+  public EstadoValvula = EstacionMonitoreo`EstadoValvula;
+
+instance variables
+  public idValvula          : ValvulaId := mk_token("V0");
+  public estado             : EstadoValvula := <CERRADA>;
+  public volTanque          : real := 0.0;
+  public capMaxTanque       : real := 100.0;
+  public neutralizanteListo : bool := false;
+
+  -- capacidad fisica y consistencia de estados
+  inv capMaxTanque > 0.0 and
+      volTanque >= 0.0 and
+      volTanque <= capMaxTanque and
+      (estado = <DESVIADA_POZA> => estado <> <ABIERTA_DESCARGA>);
+
+operations
+  public ValvulaControl : ValvulaId * real ==> ValvulaControl
+  ValvulaControl(id, capMax) == (
+    atomic (
+      idValvula := id;
+      capMaxTanque := capMax;
+      volTanque := 0.0;
+      neutralizanteListo := false;
+      estado := <CERRADA>;
+    );
+    return self
+  )
+  pre capMax > 0.0
+  post capMaxTanque = capMax and estado = <CERRADA> and volTanque = 0.0;
+
+  public abrirDescarga : () ==> ()
+  abrirDescarga() ==
+    estado := <ABIERTA_DESCARGA>
+  post estado = <ABIERTA_DESCARGA>;
+
+  public desviarAPoza : real ==> ()
+  desviarAPoza(volumenEntrante) == (
+    atomic (
+      estado := <DESVIADA_POZA>;
+      volTanque := volTanque + volumenEntrante;
+      neutralizanteListo := false;
+    )
+  )
+  pre volumenEntrante >= 0.0 and volTanque + volumenEntrante <= capMaxTanque
+  post estado = <DESVIADA_POZA> and
+       volTanque = volTanque~ + volumenEntrante and
+       neutralizanteListo = false;
+
+  public cerrarBloqueoTotal : () ==> ()
+  cerrarBloqueoTotal() ==
+    estado := <CERRADA>
+  post estado = <CERRADA>;
+
+  public aplicarTratamiento : () ==> ()
+  aplicarTratamiento() ==
+    neutralizanteListo := true
+  pre volTanque > 0.0
+  post neutralizanteListo = true;
+
+  -- solo purga si hay volumen y se aplico neutralizante
+  public purgarYRestablecer : () ==> ()
+  purgarYRestablecer() == (
+    atomic (
+      volTanque := 0.0;
+      neutralizanteListo := false;
+      estado := <ABIERTA_DESCARGA>;
+    )
+  )
+  pre volTanque > 0.0 and neutralizanteListo = true
+  post volTanque = 0.0 and
+       neutralizanteListo = false and
+       estado = <ABIERTA_DESCARGA>;
+
+end ValvulaControl
+
+
+class SistemaSIS_Efluentes
+
+types
+  public EstadoSistema = <MODO_NORMAL> | <MODO_CONTINGENCIA> | <BLOQUEO_EMERGENCIA>;
+
+  public EventoEmergencia ::
+    idEstacion  : EstacionMonitoreo`EstacionId
+    causa       : set of EstacionMonitoreo`ParametroQuimico
+    fallaSensor : bool
+    estadoFinal : ValvulaControl`EstadoValvula;
+
+instance variables
+  public estaciones      : map EstacionMonitoreo`EstacionId to EstacionMonitoreo := {|->};
+  -- mapeo inyectivo 1 a 1: cada estacion tiene su propia valvula
+  public actuadores      : inmap EstacionMonitoreo`EstacionId to ValvulaControl := {|->};
+  public bitacoraEventos : seq of EventoEmergencia := [];
+  public estadoGlobal    : EstadoSistema := <MODO_NORMAL>;
+
+  -- regla fail-safe global: con infraccion o falla de sensor no puede estar abierta
+  inv dom estaciones = dom actuadores and
+      forall idEst in set dom estaciones &
+        ((estaciones(idEst).parametrosEnInfraccion <> {} or
+          estaciones(idEst).lecturaActual.estadoSensor <> <OPERATIVO>) =>
+            actuadores(idEst).estado <> <ABIERTA_DESCARGA>);
+
+operations
+  public SistemaSIS_Efluentes : () ==> SistemaSIS_Efluentes
+  SistemaSIS_Efluentes() == (
+    estaciones := {|->};
+    actuadores := {|->};
+    bitacoraEventos := [];
+    estadoGlobal := <MODO_NORMAL>;
+    return self
+  );
+
+  public registrarEstacion : EstacionMonitoreo * ValvulaControl ==> ()
+  registrarEstacion(est, valv) == (
+    atomic (
+      estaciones := estaciones munion { est.idEstacion |-> est };
+      actuadores := actuadores munion { est.idEstacion |-> valv };
+    )
+  )
+  pre est.idEstacion not in set dom estaciones and
+      valv not in set rng actuadores and
+      (valv.estado = <ABIERTA_DESCARGA> =>
+        (est.parametrosEnInfraccion = {} and est.lecturaActual.estadoSensor = <OPERATIVO>))
+  post est.idEstacion in set dom estaciones and
+       est.idEstacion in set dom actuadores;
+
+  public procesarNuevaLectura : EstacionMonitoreo`EstacionId *
+                                EstacionMonitoreo`LecturaEfluente * real ==> ()
+  procesarNuevaLectura(idEst, nuevaLectura, volumenEstimado) == (
+    dcl est  : EstacionMonitoreo := estaciones(idEst);
+    dcl valv : ValvulaControl := actuadores(idEst);
+
+    -- si hay infraccion o sensor falla, conmuta a poza o cierre total
+    if (nuevaLectura.ph < EstacionMonitoreo`LMP_PH_MIN or
+        nuevaLectura.ph > EstacionMonitoreo`LMP_PH_MAX or
+        nuevaLectura.cianuroTotal > EstacionMonitoreo`LMP_CIANURO_MAX or
+        nuevaLectura.arsenicoTotal > EstacionMonitoreo`LMP_ARSENICO_MAX or
+        nuevaLectura.sst > EstacionMonitoreo`LMP_SST_MAX or
+        nuevaLectura.estadoSensor <> <OPERATIVO>)
+    then (
+      if valv.volTanque + volumenEstimado <= valv.capMaxTanque then (
+        valv.desviarAPoza(volumenEstimado);
+        estadoGlobal := <MODO_CONTINGENCIA>;
+      ) else (
+        valv.cerrarBloqueoTotal();
+        estadoGlobal := <BLOQUEO_EMERGENCIA>;
+      );
+      est.registrarLectura(nuevaLectura);
+      bitacoraEventos := bitacoraEventos ^ [
+        mk_EventoEmergencia(
+          idEst,
+          est.parametrosEnInfraccion,
+          nuevaLectura.estadoSensor <> <OPERATIVO>,
+          valv.estado
+        )
+      ];
+    ) else (
+      est.registrarLectura(nuevaLectura);
+      if valv.estado <> <ABIERTA_DESCARGA> and valv.volTanque = 0.0 then
+        valv.abrirDescarga();
+      actualizarEstadoGlobal();
+    );
+  )
+  pre idEst in set dom estaciones and volumenEstimado >= 0.0;
+
+  public aplicarTratamientoEstacion : EstacionMonitoreo`EstacionId ==> ()
+  aplicarTratamientoEstacion(idEst) == (
+    actuadores(idEst).aplicarTratamiento();
+  )
+  pre idEst in set dom actuadores and
+      actuadores(idEst).volTanque > 0.0
+  post actuadores(idEst).neutralizanteListo = true;
+
+  public autorizarPurgaTanque : EstacionMonitoreo`EstacionId ==> ()
+  autorizarPurgaTanque(idEst) == (
+    actuadores(idEst).purgarYRestablecer();
+    actualizarEstadoGlobal();
+  )
+  pre idEst in set dom estaciones and
+      estaciones(idEst).parametrosEnInfraccion = {} and
+      estaciones(idEst).lecturaActual.estadoSensor = <OPERATIVO> and
+      actuadores(idEst).volTanque > 0.0 and
+      actuadores(idEst).neutralizanteListo = true
+  post actuadores(idEst).estado = <ABIERTA_DESCARGA> and
+       actuadores(idEst).volTanque = 0.0;
+
+  -- submapa de estaciones con problemas para reporte OEFA
+  public obtenerMapaEstacionesCriticas : () ==> map EstacionMonitoreo`EstacionId to EstacionMonitoreo
+  obtenerMapaEstacionesCriticas() == (
+    dcl idsCriticos : set of EstacionMonitoreo`EstacionId :=
+      { id | id in set dom estaciones &
+        estaciones(id).parametrosEnInfraccion <> {} or
+        estaciones(id).lecturaActual.estadoSensor <> <OPERATIVO> };
+    return idsCriticos <: estaciones;
+  );
+
+  private actualizarEstadoGlobal : () ==> ()
+  actualizarEstadoGlobal() == (
+    if exists id in set dom actuadores & actuadores(id).estado = <CERRADA> and
+       (estaciones(id).parametrosEnInfraccion <> {} or estaciones(id).lecturaActual.estadoSensor <> <OPERATIVO>)
+    then
+      estadoGlobal := <BLOQUEO_EMERGENCIA>
+    elseif exists id in set dom actuadores & actuadores(id).estado = <DESVIADA_POZA>
+    then
+      estadoGlobal := <MODO_CONTINGENCIA>
+    else
+      estadoGlobal := <MODO_NORMAL>;
+  );
+
+end SistemaSIS_Efluentes
+
+
+class TestSistemaSIS_Efluentes
+
+operations
+  -- CP-01: flujo dentro de los limites legales
+  public test01_OperacionNormal : () ==> bool
+  test01_OperacionNormal() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_UCHUSUMA_01");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_UCHUSUMA_01");
+    dcl lectNormal : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.2, 0.45, 0.04, 25.0, <OPERATIVO>, <ABIERTA_DESCARGA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Cuenca Rio Chili - Arequipa", lectNormal);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 500.0);
+
+    sis.registrarEstacion(est1, val1);
+    sis.procesarNuevaLectura(idE1, lectNormal, 50.0);
+
+    return (val1.estado = <ABIERTA_DESCARGA>) and
+           (sis.estadoGlobal = <MODO_NORMAL>) and
+           (est1.parametrosEnInfraccion = {}) and
+           (len sis.bitacoraEventos = 0);
+  );
+
+  -- CP-02: exceso de cianuro -> desvio a poza
+  public test02_DesvioPozaPorCianuro : () ==> bool
+  test02_DesvioPozaPorCianuro() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_TAMBO_02");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_TAMBO_02");
+    dcl lectInicial : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.5, 0.30, 0.02, 18.0, <OPERATIVO>, <CERRADA>);
+    dcl lectCritica : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.5, 1.45, 0.02, 18.0, <OPERATIVO>, <DESVIADA_POZA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Cuenca Rio Tambo", lectInicial);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 500.0);
+
+    sis.registrarEstacion(est1, val1);
+    sis.procesarNuevaLectura(idE1, lectCritica, 120.0);
+
+    return (val1.estado = <DESVIADA_POZA>) and
+           (val1.volTanque = 120.0) and
+           (est1.parametrosEnInfraccion = {<CIANURO_TOTAL>}) and
+           (sis.estadoGlobal = <MODO_CONTINGENCIA>) and
+           (len sis.bitacoraEventos = 1);
+  );
+
+  -- CP-03: fallo de sensor -> desvio preventivo
+  public test03_DesvioPozaPorFallaSensor : () ==> bool
+  test03_DesvioPozaPorFallaSensor() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_MANTARO_03");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_MANTARO_03");
+    dcl lectInicial : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.0, 0.20, 0.01, 10.0, <OPERATIVO>, <CERRADA>);
+    dcl lectSinSenal : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.0, 0.20, 0.01, 10.0, <SIN_SENAL>, <DESVIADA_POZA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Cuenca Rio Mantaro", lectInicial);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 300.0);
+
+    sis.registrarEstacion(est1, val1);
+    sis.procesarNuevaLectura(idE1, lectSinSenal, 80.0);
+
+    return (val1.estado = <DESVIADA_POZA>) and
+           (sis.estadoGlobal = <MODO_CONTINGENCIA>) and
+           (sis.bitacoraEventos(1).fallaSensor = true);
+  );
+
+  -- CP-04: poza saturada -> cierre total de emergencia
+  public test04_BloqueoTotalPorCapacidad : () ==> bool
+  test04_BloqueoTotalPorCapacidad() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_SANTA_04");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_SANTA_04");
+    dcl lectInicial : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.1, 0.40, 0.03, 20.0, <OPERATIVO>, <CERRADA>);
+    dcl lectArsenico : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(5.2, 0.40, 0.25, 65.0, <OPERATIVO>, <CERRADA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Cuenca Rio Santa", lectInicial);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 200.0);
+
+    sis.registrarEstacion(est1, val1);
+    sis.procesarNuevaLectura(idE1, lectArsenico, 150.0);
+    sis.procesarNuevaLectura(idE1, lectArsenico, 80.0);
+
+    return (val1.estado = <CERRADA>) and
+           (val1.volTanque = 150.0) and
+           (sis.estadoGlobal = <BLOQUEO_EMERGENCIA>) and
+           (est1.parametrosEnInfraccion = {<PH>, <ARSENICO_TOTAL>, <SST>}) and
+           (len sis.bitacoraEventos = 2);
+  );
+
+  -- CP-05: neutralizacion y purga
+  public test05_TratamientoYPurgaSegura : () ==> bool
+  test05_TratamientoYPurgaSegura() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_CHILI_05");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_CHILI_05");
+    dcl lectInicial : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.4, 0.25, 0.02, 15.0, <OPERATIVO>, <CERRADA>);
+    dcl lectInfraccion : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(9.8, 1.20, 0.02, 15.0, <OPERATIVO>, <DESVIADA_POZA>);
+    dcl lectNormalizada : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.3, 0.35, 0.03, 19.0, <OPERATIVO>, <DESVIADA_POZA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Cuenca Rio Chili", lectInicial);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 400.0);
+
+    sis.registrarEstacion(est1, val1);
+    sis.procesarNuevaLectura(idE1, lectInfraccion, 100.0);
+    sis.procesarNuevaLectura(idE1, lectNormalizada, 40.0);
+    sis.aplicarTratamientoEstacion(idE1);
+    sis.autorizarPurgaTanque(idE1);
+
+    return (val1.volTanque = 0.0) and
+           (val1.neutralizanteListo = false) and
+           (val1.estado = <ABIERTA_DESCARGA>) and
+           (sis.estadoGlobal = <MODO_NORMAL>);
+  );
+
+  -- CP-06: soporte multi-estacion
+  public test06_EscalabilidadMultiEstacion : () ==> bool
+  test06_EscalabilidadMultiEstacion() == (
+    dcl sis  : SistemaSIS_Efluentes := new SistemaSIS_Efluentes();
+    dcl idE1 : EstacionMonitoreo`EstacionId := mk_token("EST_NORTE_01");
+    dcl idE2 : EstacionMonitoreo`EstacionId := mk_token("EST_SUR_02");
+    dcl idV1 : ValvulaControl`ValvulaId := mk_token("VALV_NORTE_01");
+    dcl idV2 : ValvulaControl`ValvulaId := mk_token("VALV_SUR_02");
+    dcl lectOk : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.0, 0.20, 0.01, 12.0, <OPERATIVO>, <CERRADA>);
+    dcl lectFalla : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.0, 1.80, 0.01, 12.0, <OPERATIVO>, <DESVIADA_POZA>);
+    dcl est1 : EstacionMonitoreo := new EstacionMonitoreo(idE1, "Sector Norte", lectOk);
+    dcl est2 : EstacionMonitoreo := new EstacionMonitoreo(idE2, "Sector Sur", lectOk);
+    dcl val1 : ValvulaControl := new ValvulaControl(idV1, 500.0);
+    dcl val2 : ValvulaControl := new ValvulaControl(idV2, 500.0);
+    dcl criticas : map EstacionMonitoreo`EstacionId to EstacionMonitoreo := {|->};
+
+    sis.registrarEstacion(est1, val1);
+    sis.registrarEstacion(est2, val2);
+    sis.procesarNuevaLectura(idE1, lectOk, 30.0);
+    sis.procesarNuevaLectura(idE2, lectFalla, 90.0);
+    criticas := sis.obtenerMapaEstacionesCriticas();
+
+    return (card dom sis.estaciones = 2) and
+           (val1.estado = <ABIERTA_DESCARGA>) and
+           (val2.estado = <DESVIADA_POZA>) and
+           (dom criticas = {idE2});
+  );
+
+  -- CP-07: prueba negativa de invariante Fail-Safe (fuerza Runtime Error 4060)
+  public test07_NegativaInvarianteFailSafe : () ==> bool
+  test07_NegativaInvarianteFailSafe() == (
+    dcl lInvalida : EstacionMonitoreo`LecturaEfluente :=
+      mk_EstacionMonitoreo`LecturaEfluente(7.2, 0.40, 0.25, 20.0, <OPERATIVO>, <ABIERTA_DESCARGA>);
+    return true;
+  );
+
+  -- CP-08: prueba negativa de precondicion de purga (fuerza Runtime Error 4071)
+  public test08_NegativaPrecondicionPurga : () ==> bool
+  test08_NegativaPrecondicionPurga() == (
+    dcl v : ValvulaControl := new ValvulaControl(mk_token("V_TEST"), 100.0);
+    v.desviarAPoza(40.0);
+    v.purgarYRestablecer();
+    return true;
+  );
+
+  public ejecutarTodasLasPruebas : () ==> seq of bool
+  ejecutarTodasLasPruebas() ==
+    return [
+      test01_OperacionNormal(),
+      test02_DesvioPozaPorCianuro(),
+      test03_DesvioPozaPorFallaSensor(),
+      test04_BloqueoTotalPorCapacidad(),
+      test05_TratamientoYPurgaSegura(),
+      test06_EscalabilidadMultiEstacion()
+    ];
+
+end TestSistemaSIS_Efluentes

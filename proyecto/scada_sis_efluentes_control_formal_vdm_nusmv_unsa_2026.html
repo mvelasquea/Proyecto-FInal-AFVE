@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SCADA SIS-Efluentes | Control Formal VDM++ &amp; NuSMV — UNSA 2026</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: #0b1120;
+      color: #e2e8f0;
+    }
+    .font-mono-tech {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    }
+    .scada-panel {
+      background: linear-gradient(180deg, rgba(17, 24, 39, 0.96) 0%, rgba(15, 23, 42, 0.98) 100%);
+      border: 1px solid rgba(51, 65, 85, 0.75);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+    @keyframes flowDash {
+      to {
+        stroke-dashoffset: -28;
+      }
+    }
+    .pipe-flow {
+      stroke-dasharray: 10 8;
+      animation: flowDash 0.8s linear infinite;
+    }
+    .pipe-flow-slow {
+      stroke-dasharray: 8 10;
+      animation: flowDash 1.4s linear infinite;
+    }
+    @keyframes pulseLed {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+    .led-blink {
+      animation: pulseLed 1s ease-in-out infinite;
+    }
+    input[type="range"] {
+      accent-color: #10b981;
+    }
+    input[type="range"].range-danger {
+      accent-color: #ef4444;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-md w-[calc(100%-2rem)] pointer-events-none"></div>
+
+  <!-- Top SCADA Header -->
+  <header class="border-b border-slate-800 bg-slate-950/90 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-[1440px] mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center shrink-0">
+          <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-100">SCADA SIS-Efluentes Mineros</h1>
+            <span class="text-[11px] font-mono-tech px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">VDM++ &amp; NuSMV</span>
+          </div>
+          <p class="text-xs text-slate-400">D.S. N.° 010-2010-MINAM (OEFA) · UNSA Ingeniería de Sistemas — Feria de Proyectos 2026</p>
+        </div>
+      </div>
+
+      <!-- Global Mode & Station Switcher -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg p-1" role="tablist" aria-label="Estaciones de monitoreo">
+          <button id="btn-est-1" type="button" class="px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors bg-emerald-600 text-white">
+            EST_UCHUSUMA_01
+          </button>
+          <button id="btn-est-2" type="button" class="px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors text-slate-300 hover:bg-slate-800">
+            EST_TAMBO_02
+          </button>
+        </div>
+
+        <div id="global-mode-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-mono-tech text-xs font-bold">
+          <span id="global-mode-led" class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+          <span id="global-mode-text">&lt;MODO_NORMAL&gt;</span>
+        </div>
+
+        <button id="btn-reset-all" type="button" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 transition-colors">
+          Reiniciar SIS
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-[1440px] mx-auto px-4 py-4 space-y-4">
+    <!-- Quick Demo Presets Bar (CP-01 to CP-08) -->
+    <section class="scada-panel rounded-xl p-3">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Escenarios de Validación Formal (Overture CP-01 a CP-08)</span>
+        <span id="active-station-meta" class="text-xs font-mono-tech text-cyan-300">Cuenca Río Chili - Arequipa · Válvula: VALV_UCHUSUMA_01 (inmap 1:1)</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <button data-preset="cp01" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-700/50 text-emerald-200 transition">CP-01 Normal</button>
+        <button data-preset="cp02" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-950/70 hover:bg-amber-900/80 border border-amber-700/50 text-amber-200 transition">CP-02 Exceso Cianuro</button>
+        <button data-preset="cp03" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-amber-950/70 hover:bg-amber-900/80 border border-amber-700/50 text-amber-200 transition">CP-03 Falla Sensor</button>
+        <button data-preset="cp04" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-rose-950/70 hover:bg-rose-900/80 border border-rose-700/50 text-rose-200 transition">CP-04 Poza Saturada</button>
+        <button data-preset="cp05" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-cyan-950/70 hover:bg-cyan-900/80 border border-cyan-700/50 text-cyan-200 transition">CP-05 Tratamiento + Purga</button>
+        <button data-preset="cp06" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-950/70 hover:bg-indigo-900/80 border border-indigo-700/50 text-indigo-200 transition">CP-06 Multi-Estación</button>
+        <button data-preset="cp07" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-950/80 hover:bg-red-900/90 border border-red-600/60 text-red-200 transition">CP-07 Invariante (Error 4060)</button>
+        <button data-preset="cp08" type="button" class="preset-btn px-2.5 py-1.5 rounded-lg text-xs font-medium bg-red-950/80 hover:bg-red-900/90 border border-red-600/60 text-red-200 transition">CP-08 Precondición (Error 4071)</button>
+      </div>
+    </section>
+
+    <!-- Main 12-Column SCADA Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <!-- Left Column: Live P&ID Schematic + Formal Verification Monitor (7 cols) -->
+      <div class="lg:col-span-7 space-y-4">
+        <!-- P&ID Process Mimic -->
+        <section class="scada-panel rounded-xl p-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-slate-100">Sinóptico P&amp;ID en Tiempo Real — Circuito de Descarga</h2>
+              <p class="text-xs text-slate-400">Conmutación automática Fail-Safe de <span class="font-mono-tech text-slate-300">ValvulaControl</span></p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-slate-400">Estado Válvula:</span>
+              <span id="valve-badge" class="font-mono-tech text-xs font-bold px-2.5 py-1 rounded-md bg-rose-500/15 border border-rose-500/40 text-rose-300">&lt;CERRADA&gt;</span>
+            </div>
+          </div>
+
+          <!-- Responsive Industrial SVG P&ID -->
+          <div class="w-full rounded-lg bg-slate-950/85 border border-slate-800/90 p-2 overflow-hidden">
+            <svg viewBox="0 0 760 330" class="w-full h-auto block" role="img" aria-label="Diagrama P&ID del sistema de control de efluentes mineros">
+              <defs>
+                <pattern id="scadaGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+                  <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#1e293b" stroke-width="0.6" />
+                </pattern>
+                <linearGradient id="tankWaterGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop id="water-stop-1" offset="0%" stop-color="#f59e0b" stop-opacity="0.85" />
+                  <stop id="water-stop-2" offset="100%" stop-color="#b45309" stop-opacity="0.95" />
+                </linearGradient>
+              </defs>
+
+              <!-- Background Grid -->
+              <rect width="760" height="330" fill="url(#scadaGrid)" />
+
+              <!-- Inlet Pipe (Plant -> Sensor -> Valve) -->
+              <path d="M 35 120 L 310 120" stroke="#334155" stroke-width="14" stroke-linecap="round" fill="none" />
+              <path id="pipe-inlet-flow" d="M 40 120 L 305 120" stroke="#38bdf8" stroke-width="5" fill="none" class="pipe-flow" />
+
+              <!-- River Discharge Pipe (Valve -> River Outfall) -->
+              <path d="M 390 120 L 650 120" stroke="#334155" stroke-width="14" stroke-linecap="round" fill="none" />
+              <path id="pipe-river-flow" d="M 395 120 L 645 120" stroke="#10b981" stroke-width="5" fill="none" opacity="0.15" />
+
+              <!-- Diversion Pipe (Valve -> Retention Pond) -->
+              <path d="M 350 160 L 350 235 L 470 235" stroke="#334155" stroke-width="14" stroke-linejoin="round" fill="none" />
+              <path id="pipe-pond-flow" d="M 350 162 L 350 235 L 468 235" stroke="#f59e0b" stroke-width="5" stroke-linejoin="round" fill="none" opacity="0.15" />
+
+              <!-- Chemical Neutralizer Line (Dosing Tank -> Pond) -->
+              <path d="M 650 250 L 595 250" stroke="#334155" stroke-width="8" fill="none" />
+              <path id="pipe-chem-flow" d="M 648 250 L 598 250" stroke="#22d3ee" stroke-width="3.5" fill="none" opacity="0.2" />
+
+              <!-- Plant Source Box -->
+              <rect x="14" y="88" width="84" height="64" rx="8" fill="#1e293b" stroke="#475569" stroke-width="1.8" />
+              <text x="56" y="114" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">PLANTA</text>
+              <text x="56" y="130" text-anchor="middle" fill="#94a3b8" font-size="9.5">Efluente</text>
+              <text x="56" y="143" text-anchor="middle" fill="#38bdf8" font-size="9" font-family="JetBrains Mono">ENTRADA</text>
+
+              <!-- Sensor Probe Unit -->
+              <rect id="svg-sensor-box" x="142" y="42" width="116" height="58" rx="8" fill="#0f172a" stroke="#10b981" stroke-width="2" />
+              <line x1="200" y1="100" x2="200" y2="120" stroke="#94a3b8" stroke-width="3" />
+              <circle id="svg-sensor-led" cx="158" cy="58" r="5" fill="#10b981" />
+              <text x="170" y="61" fill="#e2e8f0" font-size="10.5" font-weight="700">SONDA LMP</text>
+              <text id="svg-sensor-status" x="200" y="79" text-anchor="middle" fill="#34d399" font-size="9.5" font-family="JetBrains Mono">&lt;OPERATIVO&gt;</text>
+              <text id="svg-lmp-status" x="200" y="93" text-anchor="middle" fill="#94a3b8" font-size="8.5">LMP: OK</text>
+
+              <!-- 3-Way Control Valve -->
+              <g id="svg-valve-group">
+                <rect id="svg-valve-halo" x="306" y="78" width="88" height="86" rx="12" fill="#0f172a" stroke="#ef4444" stroke-width="2.2" />
+                <!-- Valve bowtie icon -->
+                <polygon id="svg-valve-tri1" points="324,106 350,120 324,134" fill="#ef4444" />
+                <polygon id="svg-valve-tri2" points="376,106 350,120 376,134" fill="#ef4444" />
+                <polygon id="svg-valve-tri3" points="338,144 350,120 362,144" fill="#475569" />
+                <circle cx="350" cy="120" r="5.5" fill="#e2e8f0" />
+                <text x="350" y="94" text-anchor="middle" fill="#cbd5e1" font-size="9.5" font-weight="700">VÁLVULA SIS</text>
+                <text id="svg-valve-label" x="350" y="158" text-anchor="middle" fill="#fca5a5" font-size="8.5" font-family="JetBrains Mono">&lt;CERRADA&gt;</text>
+              </g>
+
+              <!-- River Outfall Box -->
+              <rect id="svg-river-box" x="636" y="84" width="110" height="72" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1.8" />
+              <text x="691" y="108" text-anchor="middle" fill="#e2e8f0" font-size="11" font-weight="700">CUENCA / RÍO</text>
+              <text id="svg-river-status" x="691" y="126" text-anchor="middle" fill="#94a3b8" font-size="9.5" font-family="JetBrains Mono">SIN DESCARGA</text>
+              <text x="691" y="144" text-anchor="middle" fill="#64748b" font-size="8.5">Fiscalización OEFA</text>
+
+              <!-- Retention Pond / Tank -->
+              <g>
+                <rect x="470" y="182" width="128" height="122" rx="8" fill="#0f172a" stroke="#475569" stroke-width="2" />
+                <!-- Fluid level clip rect -->
+                <clipPath id="tankClip">
+                  <rect x="474" y="186" width="120" height="114" rx="5" />
+                </clipPath>
+                <rect id="svg-tank-fluid" x="474" y="300" width="120" height="0" fill="url(#tankWaterGrad)" clip-path="url(#tankClip)" />
+                <!-- Capacity Lines -->
+                <line x1="474" y1="215" x2="492" y2="215" stroke="#64748b" stroke-width="1" stroke-dasharray="2 2" />
+                <line x1="474" y1="244" x2="492" y2="244" stroke="#64748b" stroke-width="1" stroke-dasharray="2 2" />
+                <line x1="474" y1="272" x2="492" y2="272" stroke="#64748b" stroke-width="1" stroke-dasharray="2 2" />
+                <text x="534" y="201" text-anchor="middle" fill="#e2e8f0" font-size="10.5" font-weight="700">POZA RETENCIÓN</text>
+                <text id="svg-tank-vol" x="534" y="250" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="700" font-family="JetBrains Mono">0 / 200 m³</text>
+                <text id="svg-tank-pct" x="534" y="268" text-anchor="middle" fill="#cbd5e1" font-size="10" font-family="JetBrains Mono">0% capacidad</text>
+                <text id="svg-tank-neut" x="534" y="290" text-anchor="middle" fill="#94a3b8" font-size="8.5" font-family="JetBrains Mono">Neutralizante: NO</text>
+              </g>
+
+              <!-- Chemical Dosing Tank -->
+              <rect id="svg-chem-box" x="646" y="210" width="100" height="80" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1.8" />
+              <text x="696" y="234" text-anchor="middle" fill="#e2e8f0" font-size="10" font-weight="700">DOSIFICADOR</text>
+              <text x="696" y="250" text-anchor="middle" fill="#22d3ee" font-size="9">Neutralizante</text>
+              <text id="svg-chem-status" x="696" y="272" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">EN ESPERA</text>
+
+              <!-- Fail-Safe Banner inside SVG -->
+              <rect x="14" y="264" width="295" height="44" rx="6" fill="#0f172a" stroke="#1e293b" stroke-width="1.5" />
+              <text x="26" y="282" fill="#94a3b8" font-size="9" font-weight="600">INVARIANTE FAIL-SAFE (VDM++):</text>
+              <text id="svg-inv-text" x="26" y="298" fill="#34d399" font-size="9.5" font-family="JetBrains Mono">ABIERTA =&gt; OPERATIVO ∧ LMP  [VERIFICADO]</text>
+            </svg>
+          </div>
+
+          <!-- Tank & Neutralization Action Controls -->
+          <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div class="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 flex flex-col justify-between">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-400">Nivel Poza</span>
+                <span id="kpi-tank" class="font-mono-tech font-bold text-slate-100">0.0 / 200.0 m³</span>
+              </div>
+              <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden mt-2">
+                <div id="bar-tank" class="h-full bg-amber-500 transition-all duration-300" style="width: 0%"></div>
+              </div>
+            </div>
+
+            <button id="btn-treat" type="button" class="px-3 py-2.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/35 border border-cyan-500/40 text-cyan-200 text-xs font-semibold transition flex flex-col items-center justify-center gap-0.5">
+              <span>Aplicar Tratamiento Químico</span>
+              <span class="font-mono-tech text-[10px] text-cyan-400">aplicarTratamientoEstacion()</span>
+            </button>
+
+            <button id="btn-purge" type="button" class="px-3 py-2.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-200 text-xs font-semibold transition flex flex-col items-center justify-center gap-0.5">
+              <span>Autorizar Purga y Restablecer</span>
+              <span class="font-mono-tech text-[10px] text-emerald-400">autorizarPurgaTanque()</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- NuSMV LTL Properties & VDM++ Invariant Live Verification Panel -->
+        <section class="scada-panel rounded-xl p-4">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <h2 class="text-sm font-bold text-slate-100">Monitor de Verificación Formal (Invariante VDM++ &amp; LTL NuSMV)</h2>
+            <span class="text-[11px] font-mono-tech px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300">5/5 LTL TRUE</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2">
+              <div>
+                <div class="font-semibold text-slate-200">P1 · Seguridad Fail-Safe</div>
+                <div class="font-mono-tech text-[11px] text-slate-400 mt-0.5">G (emergencia -&gt; X (valvula != ABIERTA))</div>
+              </div>
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono-tech text-[10px] font-bold shrink-0">TRUE</span>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2">
+              <div>
+                <div class="font-semibold text-slate-200">P2 · Bloqueo por Saturación</div>
+                <div class="font-mono-tech text-[11px] text-slate-400 mt-0.5">G ((emergencia &amp; vol=MAX) -&gt; X CERRADA)</div>
+              </div>
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono-tech text-[10px] font-bold shrink-0">TRUE</span>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2">
+              <div>
+                <div class="font-semibold text-slate-200">P3 · Límite Físico de Poza</div>
+                <div class="font-mono-tech text-[11px] text-slate-400 mt-0.5">G (0 &lt;= volTanque &lt;= capMaxTanque)</div>
+              </div>
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono-tech text-[10px] font-bold shrink-0">TRUE</span>
+            </div>
+            <div class="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 flex items-start justify-between gap-2">
+              <div>
+                <div class="font-semibold text-slate-200">P4 &amp; P5 · Permisivo y Vivacidad Purga</div>
+                <div class="font-mono-tech text-[11px] text-slate-400 mt-0.5">G (purgaHabilitada -&gt; F (ABIERTA &amp; vol=0))</div>
+              </div>
+              <span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono-tech text-[10px] font-bold shrink-0">TRUE</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right Column: Sensor Simulator Controls + Trend Chart (5 cols) -->
+      <div class="lg:col-span-5 space-y-4">
+        <section class="scada-panel rounded-xl p-4">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-slate-100">Simulador de Lectura Fisicoquímica (LMP)</h2>
+              <p class="text-xs text-slate-400">Ajusta los parámetros y ejecuta <span class="font-mono-tech text-slate-300">procesarNuevaLectura()</span></p>
+            </div>
+            <span id="infraction-count-badge" class="font-mono-tech text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300">0 Infracciones</span>
+          </div>
+
+          <div class="space-y-3">
+            <!-- pH -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <label for="input-ph" class="font-semibold text-slate-200">pH <span class="text-slate-400 font-normal">(LMP: 6.0 – 9.0 U.H.)</span></label>
+                <span id="val-ph" class="font-mono-tech font-bold text-emerald-400">7.2 U.H.</span>
+              </div>
+              <input id="input-ph" type="range" min="0" max="14" step="0.1" value="7.2" class="w-full cursor-pointer" />
+            </div>
+
+            <!-- Cianuro Total -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <label for="input-cn" class="font-semibold text-slate-200">Cianuro Total <span class="text-slate-400 font-normal">(LMP: ≤ 1.0 mg/L)</span></label>
+                <span id="val-cn" class="font-mono-tech font-bold text-emerald-400">0.45 mg/L</span>
+              </div>
+              <input id="input-cn" type="range" min="0" max="2.5" step="0.05" value="0.45" class="w-full cursor-pointer" />
+            </div>
+
+            <!-- Arsénico Total -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <label for="input-as" class="font-semibold text-slate-200">Arsénico Total <span class="text-slate-400 font-normal">(LMP: ≤ 0.10 mg/L)</span></label>
+                <span id="val-as" class="font-mono-tech font-bold text-emerald-400">0.04 mg/L</span>
+              </div>
+              <input id="input-as" type="range" min="0" max="0.4" step="0.01" value="0.04" class="w-full cursor-pointer" />
+            </div>
+
+            <!-- SST -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+              <div class="flex justify-between items-center text-xs mb-1">
+                <label for="input-sst" class="font-semibold text-slate-200">SST (Sólidos) <span class="text-slate-400 font-normal">(LMP: ≤ 50.0 mg/L)</span></label>
+                <span id="val-sst" class="font-mono-tech font-bold text-emerald-400">25.0 mg/L</span>
+              </div>
+              <input id="input-sst" type="range" min="0" max="100" step="1" value="25" class="w-full cursor-pointer" />
+            </div>
+
+            <!-- Sensor State & Incoming Volume -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+                <label for="input-sensor" class="block text-xs font-semibold text-slate-200 mb-1">EstadoSensor</label>
+                <select id="input-sensor" class="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-xs font-mono-tech text-slate-100 focus:outline-none focus:border-emerald-500">
+                  <option value="OPERATIVO">&lt;OPERATIVO&gt;</option>
+                  <option value="DEFECTUOSO">&lt;DEFECTUOSO&gt;</option>
+                  <option value="CALIBRACION">&lt;CALIBRACION&gt;</option>
+                  <option value="SIN_SENAL">&lt;SIN_SENAL&gt;</option>
+                </select>
+              </div>
+              <div class="bg-slate-900/80 border border-slate-800 rounded-lg p-2.5">
+                <div class="flex justify-between items-center text-xs mb-1">
+                  <label for="input-vol" class="font-semibold text-slate-200">Volumen entrante (v)</label>
+                  <span id="val-vol" class="font-mono-tech font-bold text-cyan-300">50 m³</span>
+                </div>
+                <input id="input-vol" type="range" min="10" max="150" step="10" value="50" class="w-full cursor-pointer" />
+              </div>
+            </div>
+
+            <button id="btn-process" type="button" class="w-full py-2.5 px-4 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-950/50 transition flex items-center justify-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+              </svg>
+              Procesar Nueva Lectura en SIS
+            </button>
+          </div>
+        </section>
+
+        <!-- Trend Chart -->
+        <section class="scada-panel rounded-xl p-4">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <h2 class="text-sm font-bold text-slate-100">Tendencia vs. Límite Máximo Permisible (% LMP)</h2>
+            <span class="text-[11px] font-mono-tech text-slate-400">100% = Umbral Legal</span>
+          </div>
+          <div class="relative h-48 w-full">
+            <canvas id="trendChart"></canvas>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Bottom Section: OEFA Sequential Audit Log -->
+    <section class="scada-panel rounded-xl p-4">
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div>
+          <h2 class="text-sm font-bold text-slate-100">Bitácora Secuencial de Auditoría OEFA (<span class="font-mono-tech text-cyan-300">seq of EventoEmergencia</span>)</h2>
+          <p class="text-xs text-slate-400">Registro cronológico inmutable de eventos críticos, infracciones LMP y bloqueos Fail-Safe</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="log-count" class="text-xs font-mono-tech px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300">0 eventos</span>
+          <button id="btn-export-csv" type="button" class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium text-slate-200 transition">Exportar CSV</button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-slate-800 text-slate-400 uppercase tracking-wider text-[11px]">
+              <th class="py-2 px-3">#</th>
+              <th class="py-2 px-3">Hora</th>
+              <th class="py-2 px-3">Estación (token)</th>
+              <th class="py-2 px-3">Tipo / Evento</th>
+              <th class="py-2 px-3">Parámetros en Infracción (set)</th>
+              <th class="py-2 px-3">Falla Sensor</th>
+              <th class="py-2 px-3">Estado Final Válvula</th>
+            </tr>
+          </thead>
+          <tbody id="audit-log-body" class="divide-y divide-slate-800/70 font-mono-tech">
+            <tr>
+              <td colspan="7" class="py-5 text-center text-slate-500 font-sans">Sin eventos de emergencia registrados. Ejecuta una lectura o selecciona un escenario CP-01 a CP-08.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // =========================================================================
+    // Modelo Formal en Memoria (Espejo 1:1 de SistemaSIS_Efluentes.vdmpp)
+    // =========================================================================
+    const LMP = {
+      PH_MIN: 6.0,
+      PH_MAX: 9.0,
+      CN_MAX: 1.0,
+      AS_MAX: 0.1,
+      SST_MAX: 50.0
+    };
+
+    function createInitialStations() {
+      return {
+        EST_UCHUSUMA_01: {
+          idEstacion: 'EST_UCHUSUMA_01',
+          idValvula: 'VALV_UCHUSUMA_01',
+          cuenca: 'Cuenca Río Chili - Arequipa',
+          estadoValvula: 'CERRADA',
+          volTanque: 0.0,
+          capMaxTanque: 200.0,
+          neutralizanteListo: false,
+          lecturaActual: { ph: 7.2, cn: 0.45, as: 0.04, sst: 25.0, sensor: 'OPERATIVO' },
+          parametrosEnInfraccion: [],
+          historial: [
+            { label: 'Init', cnPct: 45, asPct: 40, sstPct: 50 }
+          ]
+        },
+        EST_TAMBO_02: {
+          idEstacion: 'EST_TAMBO_02',
+          idValvula: 'VALV_TAMBO_02',
+          cuenca: 'Cuenca Río Tambo',
+          estadoValvula: 'CERRADA',
+          volTanque: 0.0,
+          capMaxTanque: 200.0,
+          neutralizanteListo: false,
+          lecturaActual: { ph: 7.5, cn: 0.30, as: 0.02, sst: 18.0, sensor: 'OPERATIVO' },
+          parametrosEnInfraccion: [],
+          historial: [
+            { label: 'Init', cnPct: 30, asPct: 20, sstPct: 36 }
+          ]
+        }
+      };
+    }
+
+    let state = {
+      activeStationId: 'EST_UCHUSUMA_01',
+      estadoGlobal: 'MODO_NORMAL',
+      stations: createInitialStations(),
+      bitacoraEventos: []
+    };
+
+    let trendChart = null;
+
+    // =========================================================================
+    // Funciones de Evaluación Formal (VDM++)
+    // =========================================================================
+    function evaluarInfracciones(l) {
+      const inf = [];
+      if (l.ph < LMP.PH_MIN || l.ph > LMP.PH_MAX) inf.push('<PH>');
+      if (l.cn > LMP.CN_MAX) inf.push('<CIANURO_TOTAL>');
+      if (l.as > LMP.AS_MAX) inf.push('<ARSENICO_TOTAL>');
+      if (l.sst > LMP.SST_MAX) inf.push('<SST>');
+      return inf;
+    }
+
+    function actualizarEstadoGlobal() {
+      const vals = Object.values(state.stations);
+      const hasBloqueo = vals.some(st =>
+        st.estadoValvula === 'CERRADA' &&
+        (st.parametrosEnInfraccion.length > 0 || st.lecturaActual.sensor !== 'OPERATIVO')
+      );
+      const hasContingencia = vals.some(st => st.estadoValvula === 'DESVIADA_POZA');
+
+      if (hasBloqueo) {
+        state.estadoGlobal = 'BLOQUEO_EMERGENCIA';
+      } else if (hasContingencia) {
+        state.estadoGlobal = 'MODO_CONTINGENCIA';
+      } else {
+        state.estadoGlobal = 'MODO_NORMAL';
+      }
+    }
+
+    function registrarBitacora(idEst, tipo, causa, fallaSensor, estadoFinal) {
+      const now = new Date();
+      const hora = now.toTimeString().slice(0, 8);
+      state.bitacoraEventos.unshift({
+        idx: state.bitacoraEventos.length + 1,
+        hora,
+        idEst,
+        tipo,
+        causa: causa.length ? `{ ${causa.join(', ')} }` : '{}',
+        fallaSensor,
+        estadoFinal
+      });
+    }
+
+    function procesarNuevaLectura(idEst, lectura, volumenEstimado) {
+      const st = state.stations[idEst];
+      const infracciones = evaluarInfracciones(lectura);
+      const fallaSensor = lectura.sensor !== 'OPERATIVO';
+      const emergencia = infracciones.length > 0 || fallaSensor;
+
+      st.lecturaActual = { ...lectura };
+      st.parametrosEnInfraccion = infracciones;
+
+      const stepLabel = `L${st.historial.length}`;
+      st.historial.push({
+        label: stepLabel,
+        cnPct: Math.round((lectura.cn / LMP.CN_MAX) * 100),
+        asPct: Math.round((lectura.as / LMP.AS_MAX) * 100),
+        sstPct: Math.round((lectura.sst / LMP.SST_MAX) * 100)
+      });
+      if (st.historial.length > 10) st.historial.shift();
+
+      if (emergencia) {
+        if (st.volTanque + volumenEstimado <= st.capMaxTanque) {
+          st.estadoValvula = 'DESVIADA_POZA';
+          st.volTanque = +(st.volTanque + volumenEstimado).toFixed(1);
+          st.neutralizanteListo = false;
+          registrarBitacora(idEst, 'DESVÍO A POZA', infracciones, fallaSensor, '<DESVIADA_POZA>');
+          showToast('warning', 'Conmutación Fail-Safe → <DESVIADA_POZA>',
+            `${idEst}: ${fallaSensor ? 'Falla de sensor (' + lectura.sensor + ')' : 'Infracción LMP ' + infracciones.join(', ')}. Poza en ${st.volTanque}/${st.capMaxTanque} m³.`);
+        } else {
+          st.estadoValvula = 'CERRADA';
+          registrarBitacora(idEst, 'BLOQUEO TOTAL (SATURACIÓN)', infracciones, fallaSensor, '<CERRADA>');
+          showToast('error', 'Bloqueo Hermético → <CERRADA>',
+            `${idEst}: Poza saturada (${st.volTanque} + ${volumenEstimado} > ${st.capMaxTanque} m³). Cierre total activado.`);
+        }
+      } else {
+        if (st.estadoValvula !== 'ABIERTA_DESCARGA' && st.volTanque === 0) {
+          st.estadoValvula = 'ABIERTA_DESCARGA';
+          showToast('success', 'Descarga Normal → <ABIERTA_DESCARGA>',
+            `${idEst}: Parámetros dentro de LMP y sensor <OPERATIVO>. Válvula abierta.`);
+        } else if (st.volTanque > 0) {
+          showToast('info', 'Lectura Normalizada (Poza con Volumen)',
+            `${idEst}: Efluente en norma, pero la poza retiene ${st.volTanque} m³. Aplica tratamiento y purga para reabrir.`);
+        } else {
+          showToast('success', 'Operación Normal Continua',
+            `${idEst}: Lectura registrada dentro de los límites legales.`);
+        }
+      }
+
+      actualizarEstadoGlobal();
+      renderAll();
+    }
+
+    function aplicarTratamientoEstacion(idEst) {
+      const st = state.stations[idEst];
+      if (st.volTanque <= 0) {
+        showToast('error', 'Precondición Violada (VDM++ Error 4071)',
+          `aplicarTratamiento() requiere volTanque > 0.0 (actual: 0.0 m³).`);
+        return;
+      }
+      st.neutralizanteListo = true;
+      showToast('info', 'Tratamiento Químico Aplicado',
+        `${idEst}: neutralizanteListo := true (${st.volTanque} m³ listos para purga segura).`);
+      renderAll();
+    }
+
+    function autorizarPurgaTanque(idEst) {
+      const st = state.stations[idEst];
+      const errors = [];
+      if (st.parametrosEnInfraccion.length > 0) errors.push('existen parámetros en infracción');
+      if (st.lecturaActual.sensor !== 'OPERATIVO') errors.push('sensor no operativo');
+      if (st.volTanque <= 0) errors.push('volTanque = 0.0 m³');
+      if (!st.neutralizanteListo) errors.push('neutralizanteListo = false');
+
+      if (errors.length > 0) {
+        registrarBitacora(idEst, 'BLOQUEO PURGA (ERR 4071)', st.parametrosEnInfraccion, st.lecturaActual.sensor !== 'OPERATIVO', `<${st.estadoValvula}>`);
+        showToast('error', 'Error 4071: Precondición de Purga Violada',
+          `Overture/SIS bloqueó autorizarPurgaTanque(): ${errors.join('; ')}.`);
+        renderAll();
+        return;
+      }
+
+      st.volTanque = 0.0;
+      st.neutralizanteListo = false;
+      st.estadoValvula = 'ABIERTA_DESCARGA';
+      actualizarEstadoGlobal();
+      registrarBitacora(idEst, 'PURGA SEGURA COMPLETADA', [], false, '<ABIERTA_DESCARGA>');
+      showToast('success', 'Purga Segura Ejecutada → <ABIERTA_DESCARGA>',
+        `${idEst}: Tanque vaciado (0.0 m³) y descarga normal restablecida.`);
+      renderAll();
+    }
+
+    // =========================================================================
+    // Toast System (Sandbox-Safe, no alert/confirm)
+    // =========================================================================
+    function showToast(type, title, message) {
+      const container = document.getElementById('toast-container');
+      const palette = {
+        success: 'bg-emerald-950/95 border-emerald-500/60 text-emerald-100',
+        warning: 'bg-amber-950/95 border-amber-500/60 text-amber-100',
+        error: 'bg-rose-950/95 border-rose-500/70 text-rose-100',
+        info: 'bg-cyan-950/95 border-cyan-500/60 text-cyan-100'
+      };
+      const el = document.createElement('div');
+      el.className = `pointer-events-auto rounded-lg border px-3.5 py-2.5 shadow-xl text-xs transition-all duration-300 ${palette[type] || palette.info}`;
+      el.innerHTML = `<div class="font-bold mb-0.5">${title}</div><div class="opacity-90 leading-snug">${message}</div>`;
+      container.prepend(el);
+      setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transform = 'translateX(12px)';
+        setTimeout(() => el.remove(), 300);
+      }, 4800);
+    }
+
+    // =========================================================================
+    // UI Rendering
+    // =========================================================================
+    function syncSlidersFromStation(st) {
+      document.getElementById('input-ph').value = st.lecturaActual.ph;
+      document.getElementById('input-cn').value = st.lecturaActual.cn;
+      document.getElementById('input-as').value = st.lecturaActual.as;
+      document.getElementById('input-sst').value = st.lecturaActual.sst;
+      document.getElementById('input-sensor').value = st.lecturaActual.sensor;
+      updateSliderReadouts();
+    }
+
+    function updateSliderReadouts() {
+      const ph = parseFloat(document.getElementById('input-ph').value);
+      const cn = parseFloat(document.getElementById('input-cn').value);
+      const as = parseFloat(document.getElementById('input-as').value);
+      const sst = parseFloat(document.getElementById('input-sst').value);
+      const vol = parseFloat(document.getElementById('input-vol').value);
+      const sensor = document.getElementById('input-sensor').value;
+
+      const phBad = ph < LMP.PH_MIN || ph > LMP.PH_MAX;
+      const cnBad = cn > LMP.CN_MAX;
+      const asBad = as > LMP.AS_MAX;
+      const sstBad = sst > LMP.SST_MAX;
+
+      const setStyle = (elId, inputId, text, bad) => {
+        const el = document.getElementById(elId);
+        const inp = document.getElementById(inputId);
+        el.textContent = text;
+        el.className = `font-mono-tech font-bold ${bad ? 'text-rose-400' : 'text-emerald-400'}`;
+        inp.classList.toggle('range-danger', bad);
+      };
+
+      setStyle('val-ph', 'input-ph', `${ph.toFixed(1)} U.H.`, phBad);
+      setStyle('val-cn', 'input-cn', `${cn.toFixed(2)} mg/L`, cnBad);
+      setStyle('val-as', 'input-as', `${as.toFixed(2)} mg/L`, asBad);
+      setStyle('val-sst', 'input-sst', `${sst.toFixed(1)} mg/L`, sstBad);
+      document.getElementById('val-vol').textContent = `${vol} m³`;
+
+      const count = [phBad, cnBad, asBad, sstBad].filter(Boolean).length;
+      const badge = document.getElementById('infraction-count-badge');
+      if (count > 0 || sensor !== 'OPERATIVO') {
+        badge.textContent = sensor !== 'OPERATIVO' ? `${count} Inf. + Falla Sensor` : `${count} Infracción${count > 1 ? 'es' : ''}`;
+        badge.className = 'font-mono-tech text-xs font-bold px-2 py-0.5 rounded bg-rose-500/15 border border-rose-500/50 text-rose-300';
+      } else {
+        badge.textContent = '0 Infracciones';
+        badge.className = 'font-mono-tech text-xs font-bold px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/40 text-emerald-300';
+      }
+    }
+
+    function renderSVG(st) {
+      const v = st.estadoValvula;
+      const sensorOk = st.lecturaActual.sensor === 'OPERATIVO';
+      const lmpOk = st.parametrosEnInfraccion.length === 0;
+
+      // Sensor visuals
+      document.getElementById('svg-sensor-box').setAttribute('stroke', sensorOk && lmpOk ? '#10b981' : '#ef4444');
+      const led = document.getElementById('svg-sensor-led');
+      led.setAttribute('fill', sensorOk && lmpOk ? '#10b981' : '#ef4444');
+      led.classList.toggle('led-blink', !sensorOk || !lmpOk);
+      document.getElementById('svg-sensor-status').textContent = `<${st.lecturaActual.sensor}>`;
+      document.getElementById('svg-sensor-status').setAttribute('fill', sensorOk ? '#34d399' : '#fca5a5');
+      document.getElementById('svg-lmp-status').textContent = lmpOk ? 'LMP: OK' : `INFRACCIÓN (${st.parametrosEnInfraccion.length})`;
+      document.getElementById('svg-lmp-status').setAttribute('fill', lmpOk ? '#94a3b8' : '#f87171');
+
+      // Valve & Pipes visuals
+      const riverPipe = document.getElementById('pipe-river-flow');
+      const pondPipe = document.getElementById('pipe-pond-flow');
+      const inletPipe = document.getElementById('pipe-inlet-flow');
+      const halo = document.getElementById('svg-valve-halo');
+      const t1 = document.getElementById('svg-valve-tri1');
+      const t2 = document.getElementById('svg-valve-tri2');
+      const t3 = document.getElementById('svg-valve-tri3');
+      const vLbl = document.getElementById('svg-valve-label');
+      const rStat = document.getElementById('svg-river-status');
+      const rBox = document.getElementById('svg-river-box');
+
+      if (v === 'ABIERTA_DESCARGA') {
+        halo.setAttribute('stroke', '#10b981');
+        t1.setAttribute('fill', '#10b981');
+        t2.setAttribute('fill', '#10b981');
+        t3.setAttribute('fill', '#475569');
+        vLbl.textContent = '<ABIERTA_DESCARGA>';
+        vLbl.setAttribute('fill', '#6ee7b7');
+        riverPipe.setAttribute('opacity', '1');
+        riverPipe.setAttribute('class', 'pipe-flow');
+        pondPipe.setAttribute('opacity', '0.12');
+        pondPipe.setAttribute('class', '');
+        inletPipe.setAttribute('opacity', '1');
+        inletPipe.setAttribute('class', 'pipe-flow');
+        rStat.textContent = 'DESCARGA ACTIVA';
+        rStat.setAttribute('fill', '#34d399');
+        rBox.setAttribute('stroke', '#10b981');
+      } else if (v === 'DESVIADA_POZA') {
+        halo.setAttribute('stroke', '#f59e0b');
+        t1.setAttribute('fill', '#f59e0b');
+        t2.setAttribute('fill', '#475569');
+        t3.setAttribute('fill', '#f59e0b');
+        vLbl.textContent = '<DESVIADA_POZA>';
+        vLbl.setAttribute('fill', '#fcd34d');
+        riverPipe.setAttribute('opacity', '0.12');
+        riverPipe.setAttribute('class', '');
+        pondPipe.setAttribute('opacity', '1');
+        pondPipe.setAttribute('class', 'pipe-flow');
+        inletPipe.setAttribute('opacity', '1');
+        inletPipe.setAttribute('class', 'pipe-flow');
+        rStat.textContent = 'PROTEGIDO (0 L/s)';
+        rStat.setAttribute('fill', '#94a3b8');
+        rBox.setAttribute('stroke', '#334155');
+      } else {
+        halo.setAttribute('stroke', '#ef4444');
+        t1.setAttribute('fill', '#ef4444');
+        t2.setAttribute('fill', '#ef4444');
+        t3.setAttribute('fill', '#475569');
+        vLbl.textContent = '<CERRADA>';
+        vLbl.setAttribute('fill', '#fca5a5');
+        riverPipe.setAttribute('opacity', '0.1');
+        riverPipe.setAttribute('class', '');
+        pondPipe.setAttribute('opacity', '0.1');
+        pondPipe.setAttribute('class', '');
+        inletPipe.setAttribute('opacity', '0.25');
+        inletPipe.setAttribute('class', '');
+        rStat.textContent = 'BLOQUEO TOTAL';
+        rStat.setAttribute('fill', '#f87171');
+        rBox.setAttribute('stroke', '#ef4444');
+      }
+
+      // Tank fluid level
+      const pct = Math.min(100, Math.round((st.volTanque / st.capMaxTanque) * 100));
+      const maxH = 114;
+      const fluidH = (pct / 100) * maxH;
+      const fluidEl = document.getElementById('svg-tank-fluid');
+      fluidEl.setAttribute('y', (300 - fluidH).toFixed(1));
+      fluidEl.setAttribute('height', fluidH.toFixed(1));
+
+      // Color shifts to cyan-emerald when neutralized
+      document.getElementById('water-stop-1').setAttribute('stop-color', st.neutralizanteListo ? '#22d3ee' : '#f59e0b');
+      document.getElementById('water-stop-2').setAttribute('stop-color', st.neutralizanteListo ? '#0891b2' : '#b45309');
+
+      document.getElementById('svg-tank-vol').textContent = `${st.volTanque.toFixed(0)} / ${st.capMaxTanque.toFixed(0)} m³`;
+      document.getElementById('svg-tank-pct').textContent = `${pct}% capacidad`;
+      document.getElementById('svg-tank-neut').textContent = `Neutralizante: ${st.neutralizanteListo ? 'LISTO' : 'NO'}`;
+      document.getElementById('svg-tank-neut').setAttribute('fill', st.neutralizanteListo ? '#67e8f9' : '#94a3b8');
+
+      // Chemical doser visuals
+      const chemPipe = document.getElementById('pipe-chem-flow');
+      document.getElementById('svg-chem-box').setAttribute('stroke', st.neutralizanteListo ? '#22d3ee' : '#334155');
+      document.getElementById('svg-chem-status').textContent = st.neutralizanteListo ? 'DOSIFICADO' : 'EN ESPERA';
+      document.getElementById('svg-chem-status').setAttribute('fill', st.neutralizanteListo ? '#22d3ee' : '#94a3b8');
+      chemPipe.setAttribute('opacity', st.neutralizanteListo ? '0.95' : '0.15');
+      chemPipe.setAttribute('class', st.neutralizanteListo ? 'pipe-flow-slow' : '');
+    }
+
+    function renderChart(st) {
+      const labels = st.historial.map(h => h.label);
+      const cnData = st.historial.map(h => h.cnPct);
+      const asData = st.historial.map(h => h.asPct);
+      const sstData = st.historial.map(h => h.sstPct);
+
+      if (!trendChart) {
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        trendChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              { label: 'Cianuro (% LMP)', data: cnData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.12)', tension: 0.3, borderWidth: 2, pointRadius: 3 },
+              { label: 'Arsénico (% LMP)', data: asData, borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.12)', tension: 0.3, borderWidth: 2, pointRadius: 3 },
+              { label: 'SST (% LMP)', data: sstData, borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.12)', tension: 0.3, borderWidth: 2, pointRadius: 3 }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { labels: { color: '#cbd5e1', font: { size: 11 } } }
+            },
+            scales: {
+              x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(51,65,85,0.4)' } },
+              y: {
+                beginAtZero: true,
+                suggestedMax: 160,
+                ticks: { color: '#94a3b8', font: { size: 10 }, callback: v => v + '%' },
+                grid: { color: 'rgba(51,65,85,0.4)' }
+              }
+            }
+          }
+        });
+      } else {
+        trendChart.data.labels = labels;
+        trendChart.data.datasets[0].data = cnData;
+        trendChart.data.datasets[1].data = asData;
+        trendChart.data.datasets[2].data = sstData;
+        trendChart.update();
+      }
+    }
+
+    function renderAuditLog() {
+      const tbody = document.getElementById('audit-log-body');
+      document.getElementById('log-count').textContent = `${state.bitacoraEventos.length} evento${state.bitacoraEventos.length === 1 ? '' : 's'}`;
+
+      if (state.bitacoraEventos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="py-5 text-center text-slate-500 font-sans">Sin eventos de emergencia registrados. Ejecuta una lectura o selecciona un escenario CP-01 a CP-08.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = state.bitacoraEventos.map(ev => {
+        const isBlock = ev.estadoFinal === '<CERRADA>' || ev.tipo.includes('ERR');
+        const isOk = ev.estadoFinal === '<ABIERTA_DESCARGA>';
+        const tagClass = isBlock
+          ? 'bg-rose-500/15 text-rose-300 border-rose-500/40'
+          : isOk
+            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+            : 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+        return `
+          <tr class="hover:bg-slate-900/60">
+            <td class="py-2 px-3 text-slate-400">${ev.idx}</td>
+            <td class="py-2 px-3 text-slate-300">${ev.hora}</td>
+            <td class="py-2 px-3 text-cyan-300">${ev.idEst}</td>
+            <td class="py-2 px-3 font-sans font-semibold text-slate-200">${ev.tipo}</td>
+            <td class="py-2 px-3 text-amber-300">${ev.causa}</td>
+            <td class="py-2 px-3 ${ev.fallaSensor ? 'text-rose-400 font-bold' : 'text-slate-400'}">${ev.fallaSensor ? 'TRUE' : 'FALSE'}</td>
+            <td class="py-2 px-3"><span class="px-2 py-0.5 rounded border text-[11px] font-bold ${tagClass}">${ev.estadoFinal}</span></td>
+          </tr>`;
+      }).join('');
+    }
+
+    function renderAll() {
+      const st = state.stations[state.activeStationId];
+
+      // Station tabs
+      const b1 = document.getElementById('btn-est-1');
+      const b2 = document.getElementById('btn-est-2');
+      const activeCls = 'px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors bg-emerald-600 text-white';
+      const inactiveCls = 'px-2.5 py-1.5 rounded-md text-xs font-semibold transition-colors text-slate-300 hover:bg-slate-800';
+      b1.className = state.activeStationId === 'EST_UCHUSUMA_01' ? activeCls : inactiveCls;
+      b2.className = state.activeStationId === 'EST_TAMBO_02' ? activeCls : inactiveCls;
+
+      document.getElementById('active-station-meta').textContent =
+        `${st.cuenca} · Válvula: ${st.idValvula} (inmap 1:1)`;
+
+      // Global mode badge
+      const gmBadge = document.getElementById('global-mode-badge');
+      const gmLed = document.getElementById('global-mode-led');
+      const gmText = document.getElementById('global-mode-text');
+      gmText.textContent = `<${state.estadoGlobal}>`;
+      if (state.estadoGlobal === 'MODO_NORMAL') {
+        gmBadge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 font-mono-tech text-xs font-bold';
+        gmLed.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+      } else if (state.estadoGlobal === 'MODO_CONTINGENCIA') {
+        gmBadge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border border-amber-500/50 bg-amber-500/15 text-amber-300 font-mono-tech text-xs font-bold';
+        gmLed.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 led-blink';
+      } else {
+        gmBadge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg border border-rose-500/60 bg-rose-500/15 text-rose-300 font-mono-tech text-xs font-bold';
+        gmLed.className = 'w-2.5 h-2.5 rounded-full bg-rose-500 led-blink';
+      }
+
+      // Valve badge
+      const vBadge = document.getElementById('valve-badge');
+      vBadge.textContent = `<${st.estadoValvula}>`;
+      if (st.estadoValvula === 'ABIERTA_DESCARGA') {
+        vBadge.className = 'font-mono-tech text-xs font-bold px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300';
+      } else if (st.estadoValvula === 'DESVIADA_POZA') {
+        vBadge.className = 'font-mono-tech text-xs font-bold px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/50 text-amber-300';
+      } else {
+        vBadge.className = 'font-mono-tech text-xs font-bold px-2.5 py-1 rounded-md bg-rose-500/15 border border-rose-500/50 text-rose-300';
+      }
+
+      // Tank KPI & Bar
+      const pct = Math.min(100, (st.volTanque / st.capMaxTanque) * 100);
+      document.getElementById('kpi-tank').textContent = `${st.volTanque.toFixed(1)} / ${st.capMaxTanque.toFixed(1)} m³`;
+      const bar = document.getElementById('bar-tank');
+      bar.style.width = `${pct}%`;
+      bar.className = `h-full transition-all duration-300 ${st.neutralizanteListo ? 'bg-cyan-400' : pct >= 80 ? 'bg-rose-500' : 'bg-amber-500'}`;
+
+      renderSVG(st);
+      renderChart(st);
+      renderAuditLog();
+    }
+
+    // =========================================================================
+    // Preset Scenarios (Exact match to CP-01 through CP-08 in VDM++)
+    // =========================================================================
+    function runPreset(code) {
+      const id = state.activeStationId;
+      const st = state.stations[id];
+
+      if (code === 'cp01') {
+        st.volTanque = 0;
+        st.neutralizanteListo = false;
+        const l = { ph: 7.2, cn: 0.45, as: 0.04, sst: 25.0, sensor: 'OPERATIVO' };
+        st.lecturaActual = l;
+        syncSlidersFromStation(st);
+        procesarNuevaLectura(id, l, 50);
+      } else if (code === 'cp02') {
+        st.volTanque = 0;
+        const l = { ph: 7.5, cn: 1.45, as: 0.02, sst: 18.0, sensor: 'OPERATIVO' };
+        st.lecturaActual = l;
+        syncSlidersFromStation(st);
+        procesarNuevaLectura(id, l, 120);
+      } else if (code === 'cp03') {
+        st.volTanque = 0;
+        const l = { ph: 7.0, cn: 0.20, as: 0.01, sst: 10.0, sensor: 'SIN_SENAL' };
+        st.lecturaActual = l;
+        syncSlidersFromStation(st);
+        procesarNuevaLectura(id, l, 80);
+      } else if (code === 'cp04') {
+        st.volTanque = 150;
+        st.estadoValvula = 'DESVIADA_POZA';
+        const l = { ph: 5.2, cn: 0.40, as: 0.25, sst: 65.0, sensor: 'OPERATIVO' };
+        st.lecturaActual = l;
+        syncSlidersFromStation(st);
+        procesarNuevaLectura(id, l, 80);
+      } else if (code === 'cp05') {
+        st.volTanque = 100;
+        st.estadoValvula = 'DESVIADA_POZA';
+        const l = { ph: 7.3, cn: 0.35, as: 0.03, sst: 19.0, sensor: 'OPERATIVO' };
+        st.lecturaActual = l;
+        syncSlidersFromStation(st);
+        procesarNuevaLectura(id, l, 40);
+        aplicarTratamientoEstacion(id);
+        autorizarPurgaTanque(id);
+      } else if (code === 'cp06') {
+        state.stations = createInitialStations();
+        state.activeStationId = 'EST_TAMBO_02';
+        procesarNuevaLectura('EST_UCHUSUMA_01', { ph: 7.0, cn: 0.20, as: 0.01, sst: 12.0, sensor: 'OPERATIVO' }, 30);
+        procesarNuevaLectura('EST_TAMBO_02', { ph: 7.0, cn: 1.80, as: 0.01, sst: 12.0, sensor: 'OPERATIVO' }, 90);
+        syncSlidersFromStation(state.stations['EST_TAMBO_02']);
+        showToast('info', 'CP-06 Multi-Estación Activo', 'EST_UCHUSUMA_01 está en <ABIERTA_DESCARGA> mientras EST_TAMBO_02 conmutó a <DESVIADA_POZA>.');
+      } else if (code === 'cp07') {
+        registrarBitacora(id, 'BLOQUEO INVARIANTE (ERR 4060)', ['<ARSENICO_TOTAL>'], false, `<${st.estadoValvula}>`);
+        showToast('error', 'Error 4060: Invariante Fail-Safe Violado (CP-07)',
+          'Intento rechazado: As = 0.25 mg/L (> 0.10) con válvula <ABIERTA_DESCARGA> viola el invariante de LecturaEfluente.');
+        renderAuditLog();
+      } else if (code === 'cp08') {
+        st.volTanque = 40;
+        st.neutralizanteListo = false;
+        st.estadoValvula = 'DESVIADA_POZA';
+        st.parametrosEnInfraccion = [];
+        st.lecturaActual.sensor = 'OPERATIVO';
+        autorizarPurgaTanque(id);
+      }
+    }
+
+    // =========================================================================
+    // Event Listeners
+    // =========================================================================
+    ['input-ph', 'input-cn', 'input-as', 'input-sst', 'input-vol', 'input-sensor'].forEach(id => {
+      document.getElementById(id).addEventListener('input', updateSliderReadouts);
+      document.getElementById(id).addEventListener('change', updateSliderReadouts);
+    });
+
+    document.getElementById('btn-process').addEventListener('click', () => {
+      const lectura = {
+        ph: parseFloat(document.getElementById('input-ph').value),
+        cn: parseFloat(document.getElementById('input-cn').value),
+        as: parseFloat(document.getElementById('input-as').value),
+        sst: parseFloat(document.getElementById('input-sst').value),
+        sensor: document.getElementById('input-sensor').value
+      };
+      const vol = parseFloat(document.getElementById('input-vol').value);
+      procesarNuevaLectura(state.activeStationId, lectura, vol);
+    });
+
+    document.getElementById('btn-treat').addEventListener('click', () => {
+      aplicarTratamientoEstacion(state.activeStationId);
+    });
+
+    document.getElementById('btn-purge').addEventListener('click', () => {
+      autorizarPurgaTanque(state.activeStationId);
+    });
+
+    document.getElementById('btn-est-1').addEventListener('click', () => {
+      state.activeStationId = 'EST_UCHUSUMA_01';
+      syncSlidersFromStation(state.stations[state.activeStationId]);
+      renderAll();
+    });
+
+    document.getElementById('btn-est-2').addEventListener('click', () => {
+      state.activeStationId = 'EST_TAMBO_02';
+      syncSlidersFromStation(state.stations[state.activeStationId]);
+      renderAll();
+    });
+
+    document.getElementById('btn-reset-all').addEventListener('click', () => {
+      state.stations = createInitialStations();
+      state.bitacoraEventos = [];
+      state.estadoGlobal = 'MODO_NORMAL';
+      syncSlidersFromStation(state.stations[state.activeStationId]);
+      renderAll();
+      showToast('info', 'SIS Reiniciado', 'Estaciones, pozas y bitácora OEFA restablecidas al estado inicial.');
+    });
+
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => runPreset(btn.dataset.preset));
+    });
+
+    document.getElementById('btn-export-csv').addEventListener('click', () => {
+      if (state.bitacoraEventos.length === 0) {
+        showToast('warning', 'Bitácora Vacía', 'No hay eventos para exportar todavía.');
+        return;
+      }
+      const header = 'Nro,Hora,Estacion,Tipo,Infracciones,FallaSensor,EstadoFinal\n';
+      const rows = state.bitacoraEventos.map(e =>
+        `${e.idx},${e.hora},${e.idEst},"${e.tipo}","${e.causa}",${e.fallaSensor},${e.estadoFinal}`
+      ).join('\n');
+      const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'bitacora_OEFA_SIS_Efluentes.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('success', 'CSV Exportado', 'Se descargó bitacora_OEFA_SIS_Efluentes.csv.');
+    });
+
+    // Init
+    syncSlidersFromStation(state.stations[state.activeStationId]);
+    renderAll();
+  </script>
+</body>
+</html>
